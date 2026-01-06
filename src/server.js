@@ -2,6 +2,7 @@ const express = require('express');
 const session = require('express-session');
 const axios = require('axios');
 const path = require('path');
+const crypto = require('crypto');
 require('dotenv').config();
 
 const app = express();
@@ -34,7 +35,14 @@ app.use(session({
 
 // Serve static files
 app.use(express.static('public'))
+// Helper functions for PKCE
+function generateCodeVerifier() {
+  return crypto.randomBytes(32).toString('base64url');
+}
 
+function generateCodeChallenge(verifier) {
+  return crypto.createHash('sha256').update(verifier).digest('base64url');
+}
 // Routes
 
 // Home - always show login page (no session persistence)
@@ -51,10 +59,21 @@ app.get('/auth/salesforce', (req, res) => {
     return res.status(500).send('Missing Salesforce configuration. Please check your .env file.');
   }
   
+  // Generate PKCE values
+  const codeVerifier = generateCodeVerifier();
+  const codeChallenge = generateCodeChallenge(codeVerifier);
+  
+  // Store code verifier in session for later use
+  req.session.codeVerifier = codeVerifier;
+  
+  console.log('🔑 PKCE code challenge generated');
+  
   const authUrl = `${config.loginUrl}/services/oauth2/authorize?` +
     `response_type=code&` +
     `client_id=${encodeURIComponent(config.clientId)}&` +
-    `redirect_uri=${encodeURIComponent(config.callbackUrl)}`;
+    `redirect_uri=${encodeURIComponent(config.callbackUrl)}&` +
+    `code_challenge=${codeChallenge}&` +
+    `code_challenge_method=S256`;
   
   console.log('➡️  Redirecting to Salesforce...');
   res.redirect(authUrl);
@@ -62,14 +81,29 @@ app.get('/auth/salesforce', (req, res) => {
 
 // OAuth callback
 app.get('/oauth/callback', async (req, res) => {
-  const { code } = req.query;
+  const { code, error, error_description } = req.query;
+  
+  if (error) {
+    console.error('❌ OAuth error from Salesforce:', error, error_description);
+    return res.status(400).send(`Authorization failed: ${error_description || error}`);
+  }
   
   if (!code) {
+    console.error('❌ No authorization code received');
     return res.status(400).send('Authorization code not found');
   }
+  
+  // Get the code verifier from session
+  const codeVerifier = req.session.codeVerifier;
+  if (!codeVerifier) {
+    console.error('❌ Code verifier not found in session');
+    return res.status(400).send('Session expired. Please try again.');
+  }
+
+  console.log('🔄 Exchanging authorization code for access token...');
 
   try {
-    // Exchange authorization code for access token
+    // Exchange authorization code for access token with PKCE
     const tokenResponse = await axios.post(
       `${config.loginUrl}/services/oauth2/token`,
       null,
@@ -79,17 +113,20 @@ app.get('/oauth/callback', async (req, res) => {
           code: code,
           client_id: config.clientId,
           client_secret: config.clientSecret,
-          redirect_uri: config.callbackUrl
+          redirect_uri: config.callbackUrl,
+          code_verifier: codeVerifier  // Add PKCE code verifier
         }
       }
     );
 
-    const { access_token, instance_url, refresh_token } = tokenResponse.data;
+    const { access_token, instance_url } = tokenResponse.data;
 
-    // Store in session
     // Store token in session temporarily
     req.session.accessToken = access_token;
     req.session.instanceUrl = instance_url;
+    
+    // Clear the code verifier from session (no longer needed)
+    delete req.session.codeVerifier;
 
     console.log('✅ OAuth successful! Redirecting to app...');
     res.redirect('/app');
