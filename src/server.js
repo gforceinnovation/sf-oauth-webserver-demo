@@ -7,77 +7,56 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(express.static('public'));
-
-// Session configuration
-app.use(session({
-  secret: process.env.SESSION_SECRET || 'dev-secret-change-in-production',
-  resave: false,
-  saveUninitialized: false,
-  cookie: { 
-    secure: process.env.NODE_ENV === 'production',
-    maxAge: 3600000 // 1 hour
-  }
-}));
-
-// Configuration from environment or AWS Secrets Manager
-let config = {
+// Simple configuration from .env file
+const config = {
   clientId: process.env.SF_CLIENT_ID,
   clientSecret: process.env.SF_CLIENT_SECRET,
   callbackUrl: process.env.SF_CALLBACK_URL,
   loginUrl: process.env.SF_LOGIN_URL || 'https://login.salesforce.com'
 };
 
-// AWS Secrets Manager integration for production
-async function loadConfigFromAWS() {
-  if (process.env.AWS_SECRET_NAME) {
-    try {
-      const AWS = require('aws-sdk');
-      const secretsManager = new AWS.SecretsManager({
-        region: process.env.AWS_REGION || 'us-east-1'
-      });
-      
-      const data = await secretsManager.getSecretValue({
-        SecretId: process.env.AWS_SECRET_NAME
-      }).promise();
-      
-      const secret = JSON.parse(data.SecretString);
-      config = {
-        clientId: secret.SF_CLIENT_ID,
-        clientSecret: secret.SF_CLIENT_SECRET,
-        callbackUrl: secret.SF_CALLBACK_URL,
-        loginUrl: secret.SF_LOGIN_URL || 'https://login.salesforce.com'
-      };
-      console.log('Configuration loaded from AWS Secrets Manager');
-    } catch (error) {
-      console.error('Error loading from AWS Secrets Manager:', error);
-      console.log('Falling back to environment variables');
-    }
-  }
-}
+console.log('🔧 Configuration loaded from .env');
+console.log('   Client ID:', config.clientId ? '✓ Set' : '✗ Missing');
+console.log('   Client Secret:', config.clientSecret ? '✓ Set' : '✗ Missing');
+console.log('   Callback URL:', config.callbackUrl || '✗ Missing');
+
+// Middleware
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Simple session - just to pass token from OAuth callback to the app
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'simple-demo-secret',
+  resave: false,
+  saveUninitialized: false,
+  cookie: { maxAge: 3600000 } // 1 hour
+}));
+
+// Serve static files
+app.use(express.static('public'))
 
 // Routes
 
-// Home page - serve the main HTML
+// Home - always show login page (no session persistence)
 app.get('/', (req, res) => {
-  if (!req.session.accessToken) {
-    res.sendFile(path.join(__dirname, '../public/login.html'));
-  } else {
-    res.sendFile(path.join(__dirname, '../public/index.html'));
-  }
+  console.log('🏠 Home route');
+  res.sendFile(path.join(__dirname, '../public/login.html'));
 });
 
 // Initiate OAuth flow
 app.get('/auth/salesforce', (req, res) => {
+  console.log('🔐 Starting OAuth flow...');
+  
+  if (!config.clientId || !config.callbackUrl) {
+    return res.status(500).send('Missing Salesforce configuration. Please check your .env file.');
+  }
+  
   const authUrl = `${config.loginUrl}/services/oauth2/authorize?` +
     `response_type=code&` +
     `client_id=${encodeURIComponent(config.clientId)}&` +
     `redirect_uri=${encodeURIComponent(config.callbackUrl)}`;
   
-  console.log('Redirecting to Salesforce OAuth...');
+  console.log('➡️  Redirecting to Salesforce...');
   res.redirect(authUrl);
 });
 
@@ -108,16 +87,26 @@ app.get('/oauth/callback', async (req, res) => {
     const { access_token, instance_url, refresh_token } = tokenResponse.data;
 
     // Store in session
+    // Store token in session temporarily
     req.session.accessToken = access_token;
     req.session.instanceUrl = instance_url;
-    req.session.refreshToken = refresh_token;
 
-    console.log('OAuth successful, access token obtained');
-    res.redirect('/');
+    console.log('✅ OAuth successful! Redirecting to app...');
+    res.redirect('/app');
   } catch (error) {
-    console.error('OAuth error:', error.response?.data || error.message);
+    console.error('❌ OAuth error:', error.response?.data || error.message);
     res.status(500).send(`Authentication failed: ${error.response?.data?.error_description || error.message}`);
   }
+});
+
+// App page - show lead form (after successful login)
+app.get('/app', (req, res) => {
+  if (!req.session.accessToken) {
+    console.log('⛔ No access token, redirecting to login');
+    return res.redirect('/');
+  }
+  console.log('📄 Serving app page');
+  res.sendFile(path.join(__dirname, '../public/app.html'));
 });
 
 // Get current user info
@@ -135,9 +124,10 @@ app.get('/api/user', async (req, res) => {
         }
       }
     );
+    console.log('✅ User info retrieved:', response.data.name);
     res.json(response.data);
   } catch (error) {
-    console.error('Error fetching user info:', error.response?.data || error.message);
+    console.error('❌ Error fetching user info:', error.response?.data || error.message);
     res.status(500).json({ error: 'Failed to fetch user info' });
   }
 });
@@ -153,6 +143,8 @@ app.post('/api/lead', async (req, res) => {
   if (!lastName || !company) {
     return res.status(400).json({ error: 'Last Name and Company are required' });
   }
+
+  console.log('📝 Creating lead:', { firstName, lastName, company });
 
   try {
     const leadData = {
@@ -175,14 +167,14 @@ app.post('/api/lead', async (req, res) => {
       }
     );
 
-    console.log('Lead created successfully:', response.data.id);
+    console.log('✅ Lead created successfully! ID:', response.data.id);
     res.json({ 
       success: true, 
       id: response.data.id,
       message: 'Lead created successfully'
     });
   } catch (error) {
-    console.error('Error creating lead:', error.response?.data || error.message);
+    console.error('❌ Error creating lead:', error.response?.data || error.message);
     res.status(500).json({ 
       error: 'Failed to create lead',
       details: error.response?.data
@@ -190,8 +182,9 @@ app.post('/api/lead', async (req, res) => {
   }
 });
 
-// Logout
+// Logout - clear session and redirect to home
 app.post('/api/logout', (req, res) => {
+  console.log('👋 Logging out...');
   req.session.destroy((err) => {
     if (err) {
       console.error('Error destroying session:', err);
@@ -200,19 +193,14 @@ app.post('/api/logout', (req, res) => {
   });
 });
 
-// Health check endpoint for AWS
+// Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'healthy', timestamp: new Date().toISOString() });
 });
 
 // Start server
-async function startServer() {
-  await loadConfigFromAWS();
-  
-  app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-  });
-}
-
-startServer();
+app.listen(PORT, () => {
+  console.log('🚀 Server running on port', PORT);
+  console.log('🌐 Open http://localhost:' + PORT);
+  console.log('');
+});

@@ -244,23 +244,27 @@
     </div>
 
     <script>
-        // Load user information
+        // Load user information on page load
         async function loadUserInfo() {
+            console.log('📋 Loading user info...');
             try {
                 const response = await fetch('/api/user');
+                
                 if (response.ok) {
                     const user = await response.json();
+                    console.log('✅ User:', user.name);
                     document.getElementById('userName').textContent = user.name || 'User';
                     document.getElementById('userEmail').textContent = user.email || '';
                     
-                    // Set avatar to first letter of name
                     const initial = (user.name || 'U').charAt(0).toUpperCase();
                     document.getElementById('userAvatar').textContent = initial;
                 } else {
+                    console.log('❌ Not authenticated');
                     window.location.href = '/';
                 }
             } catch (error) {
-                console.error('Error loading user info:', error);
+                console.error('❌ Error:', error);
+                window.location.href = '/';
             }
         }
 
