@@ -17,6 +17,8 @@ A complete demonstration of Salesforce Web Server OAuth flow with PKCE (Proof Ke
 
 - **[Authentication Setup Guide](docs/AUTH_SETUP.md)** - Complete guide to setting up Salesforce OAuth with detailed Web Server Flow + PKCE explanation
 - **[Docker Guide](docs/DOCKER.md)** - How to build and run the application in Docker
+- **[AWS Deployment Guide](docs/AWS_DEPLOYMENT.md)** - Deploy to AWS ECS with Terraform (includes static IP, IAM security, and cost management)
+- **[IAM Security Guide](docs/IAM_SECURITY.md)** - Detailed IAM roles and security best practices
 - **[Quick Start](#-quick-start)** - Get started in 5 minutes (see below)
 - **[API Reference](#-api-endpoints)** - All available endpoints
 - **[Architecture](#️-architecture)** - How the modules work together
@@ -27,7 +29,11 @@ A complete demonstration of Salesforce Web Server OAuth flow with PKCE (Proof Ke
 salesforce-oauth-demo/
 ├── docs/
 │   ├── AUTH_SETUP.md         # 📖 Detailed auth setup & flow explanation
-│   └── DOCKER.md             # 🐳 Docker build & run guide
+│   ├── DOCKER.md             # 🐳 Docker build & run guide
+│   ├── AWS_DEPLOYMENT.md     # ☁️ AWS ECS deployment guide
+│   └── IAM_SECURITY.md       # 🔒 IAM roles & security practices
+├── scripts/
+│   └── ecr-helper.sh         # 🛠️ ECR image management helper
 ├── src/
 │   ├── server.js             # Main Express server
 │   ├── auth/
@@ -246,159 +252,71 @@ Test at `http://localhost:3000`
 
 ## ☁️ AWS Deployment
 
-### Step 1: Configure AWS CLI
+**📖 For complete AWS deployment guide, see [docs/AWS_DEPLOYMENT.md](docs/AWS_DEPLOYMENT.md)**
 
+The application can be deployed to AWS ECS Fargate using the included Terraform configuration. This provides:
+- ✅ Stable ALB DNS name for Salesforce callback URL
+- ✅ Secure secrets management (AWS Secrets Manager)
+- ✅ Private subnets with proper IAM security
+- ✅ Auto-scaling and high availability
+- ✅ Easy teardown after demo (save costs)
+
+### Quick AWS Deployment
+
+**Prerequisites:**
+- AWS CLI configured with profile `gforce` and region `eu-central-1`
+- Terraform installed
+- Docker image built
+
+**1. Use the ECR Helper Script:**
 ```bash
-aws configure
-# Enter your AWS Access Key ID
-# Enter your AWS Secret Access Key
-# Default region: us-east-1
-# Default output format: json
+# Full deployment: build, tag, push to ECR
+./scripts/ecr-helper.sh deploy
+
+# This will output your ECR image URI
 ```
 
-### Step 2: Create ECR Repository and Push Image
-
-```bash
-# Get your AWS account ID
-AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-AWS_REGION=us-east-1
-
-# Authenticate Docker to ECR
-aws ecr get-login-password --region $AWS_REGION | \
-  docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
-
-# Note: ECR repository will be created by Terraform, but if you want to push first:
-# Create ECR repository
-aws ecr create-repository --repository-name sf-oauth-demo --region $AWS_REGION
-
-# Build and tag image
-docker build -t sf-oauth-demo .
-docker tag sf-oauth-demo:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/sf-oauth-demo:latest
-
-# Push to ECR
-docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/sf-oauth-demo:latest
-```
-
-### Step 3: Configure Terraform Variables
-
+**2. Configure Terraform:**
 ```bash
 cd terraform
-
-# Copy example tfvars
 cp terraform.tfvars.example terraform.tfvars
-
-# Edit with your values
-nano terraform.tfvars
+# Edit terraform.tfvars with your Salesforce credentials and ECR image URI
 ```
 
-Update `terraform.tfvars`:
-```hcl
-aws_region    = "us-east-1"
-project_name  = "sf-oauth-demo"
-environment   = "dev"
-
-sf_client_id     = "your_salesforce_consumer_key"
-sf_client_secret = "your_salesforce_consumer_secret"
-sf_callback_url  = "http://TEMP-placeholder/oauth/callback"  # Will update after deployment
-sf_login_url     = "https://login.salesforce.com"
-
-container_image = "123456789012.dkr.ecr.us-east-1.amazonaws.com/sf-oauth-demo:latest"
-session_secret  = "your_generated_session_secret"
-```
-
-### Step 4: Deploy Infrastructure with Terraform
-
+**3. Deploy Infrastructure:**
 ```bash
-# Initialize Terraform
 terraform init
-
-# Preview changes
 terraform plan
-
-# Apply infrastructure (this takes ~5-10 minutes)
 terraform apply
 ```
 
-When prompted, type `yes` to confirm.
-
-**Save the outputs!** You'll need the ALB DNS name:
-```
-Outputs:
-
-alb_dns_name = "sf-oauth-demo-alb-1234567890.us-east-1.elb.amazonaws.com"
-alb_url = "http://sf-oauth-demo-alb-1234567890.us-east-1.elb.amazonaws.com"
-```
-
-### Step 5: Update Salesforce Connected App Callback URL
-
-1. Go to Salesforce **Setup** → **App Manager**
-2. Find your Connected App → **Edit**
-3. Add the new callback URL:
-   ```
-   http://your-alb-dns-name/oauth/callback
-   ```
-4. Keep the localhost URL for local testing
-5. **Save**
-
-### Step 6: Update Terraform with Correct Callback URL
-
-Edit `terraform/terraform.tfvars`:
-```hcl
-sf_callback_url = "http://sf-oauth-demo-alb-1234567890.us-east-1.elb.amazonaws.com/oauth/callback"
-```
-
-Update the secret in AWS:
+**4. Get your ALB URL and update Salesforce:**
 ```bash
-terraform apply
+terraform output alb_url
+# Update your Salesforce Connected App callback URL with this DNS name
 ```
 
-### Step 7: Restart ECS Service
+**See [docs/AWS_DEPLOYMENT.md](docs/AWS_DEPLOYMENT.md) for:**
+- Step-by-step deployment walkthrough
+- Static IP configuration
+- IAM security setup (see also [docs/IAM_SECURITY.md](docs/IAM_SECURITY.md))
+- Secrets injection to containers
+- Cost estimates (~$30/month for demo usage)
+- Complete teardown instructions
+- Troubleshooting guide
 
-```bash
-# Force new deployment to pick up updated secrets
-aws ecs update-service \
-  --cluster sf-oauth-demo-cluster \
-  --service sf-oauth-demo-service \
-  --force-new-deployment \
-  --region us-east-1
-```
+## 🧪 Testing Locally
 
-Wait 2-3 minutes for the new task to start.
-
-### Step 8: Test Your Application
-
-Visit your ALB URL: `http://your-alb-dns-name`
-
-🎉 Your application is now live on AWS!
-
-## 📁 Project Structure
-
-```
-gforce/
-├── src/
-│   └── server.js              # Express server with OAuth logic
-├── public/
-│   ├── login.html             # Login page
-│   └── index.html             # Lead creation form
-├── terraform/
-│   ├── main.tf                # Provider configuration
-│   ├── variables.tf           # Input variables
-│   ├── outputs.tf             # Output values
-│   ├── vpc.tf                 # VPC and networking
-│   ├── alb.tf                 # Application Load Balancer
-│   ├── ecs.tf                 # ECS cluster, service, tasks
-│   ├── secrets.tf             # AWS Secrets Manager
-│   └── terraform.tfvars       # Your variable values (gitignored)
-├── Dockerfile                 # Container definition
-├── .dockerignore
-├── package.json
-├── .env.example
-├── .gitignore
-└── README.md
-```
+1. Start the server: `npm start`
+2. Open `http://localhost:3000`
+3. Click "Login with Salesforce"
+4. Authorize the application
+5. Fill in the Lead form and create a test lead
+6. Verify the lead in Salesforce
 
 ## 🏗️ Architecture
 
+### AWS Deployment Architecture
 ```
 Internet
     ↓
@@ -411,26 +329,26 @@ NAT Gateway → Internet (for Salesforce API calls)
 AWS Secrets Manager (Credentials)
 ```
 
+For detailed architecture and security, see [docs/AWS_DEPLOYMENT.md](docs/AWS_DEPLOYMENT.md) and [docs/IAM_SECURITY.md](docs/IAM_SECURITY.md).
+
 ## 💰 AWS Cost Optimization
 
-This setup is designed for AWS Free Tier:
-
-- **ECS Fargate**: First 20 GB storage + 10 GB data transfer free
-- **ALB**: First 15 LCU and 750 hours free monthly
-- **Secrets Manager**: First 30 days free, then ~$0.40/month per secret
-- **CloudWatch Logs**: 5 GB ingestion free monthly
-- **NAT Gateway**: ~$32/month (NOT free tier) - only significant cost
+**Estimated monthly cost**: ~$30 for demo usage (8 hrs/day, 20 days/month)
 
 **To minimize costs:**
 - Stop the ECS service when not demoing: 
   ```bash
   aws ecs update-service --cluster sf-oauth-demo-cluster \
-    --service sf-oauth-demo-service --desired-count 0
+    --service sf-oauth-demo-service --desired-count 0 \
+    --region eu-central-1 --profile gforce
   ```
 - Destroy infrastructure when not needed:
   ```bash
+  cd terraform
   terraform destroy
   ```
+
+See [docs/AWS_DEPLOYMENT.md](docs/AWS_DEPLOYMENT.md) for detailed cost breakdown and optimization tips.
 
 ## 🔒 Security Best Practices
 
@@ -442,6 +360,9 @@ This setup is designed for AWS Free Tier:
 - HTTPS-ready (can add ACM certificate)
 - Session secrets not hardcoded
 - Environment-based configuration
+- Least-privilege IAM roles
+
+See [docs/IAM_SECURITY.md](docs/IAM_SECURITY.md) for detailed IAM security policies and best practices.
 
 ## 🛠️ Troubleshooting
 
@@ -453,64 +374,16 @@ This setup is designed for AWS Free Tier:
 ### ECS Task Fails to Start
 ```bash
 # Check logs
-aws logs tail /ecs/sf-oauth-demo --follow --region us-east-1
+aws logs tail /ecs/sf-oauth-demo --follow --region eu-central-1 --profile gforce
 
 # Check task status
 aws ecs describe-tasks --cluster sf-oauth-demo-cluster \
   --tasks $(aws ecs list-tasks --cluster sf-oauth-demo-cluster \
   --service-name sf-oauth-demo-service --query 'taskArns[0]' --output text) \
-  --region us-east-1
+  --region eu-central-1 --profile gforce
 ```
 
-### Can't Access Application
-- Wait 2-3 minutes after deployment
-- Check ALB target group health:
-  ```bash
-  aws elbv2 describe-target-health \
-    --target-group-arn $(terraform output -raw target_group_arn) \
-    --region us-east-1
-  ```
-
-### Update Secrets
-```bash
-cd terraform
-# Edit terraform.tfvars
-terraform apply
-
-# Force new deployment
-aws ecs update-service --cluster sf-oauth-demo-cluster \
-  --service sf-oauth-demo-service --force-new-deployment
-```
-
-## 📚 API Endpoints
-
-- `GET /` - Main application (redirects to login if not authenticated)
-- `GET /auth/salesforce` - Initiates OAuth flow
-- `GET /oauth/callback` - OAuth callback handler
-- `GET /api/user` - Get current user info
-- `POST /api/lead` - Create a new lead in Salesforce
-- `POST /api/logout` - Logout and destroy session
-- `GET /health` - Health check endpoint
-
-## 🔄 CI/CD Deployment
-
-For continuous deployment, add these steps to your CI/CD pipeline:
-
-```bash
-# Build and push new image
-docker build -t $ECR_REPO:$VERSION .
-docker push $ECR_REPO:$VERSION
-
-# Update task definition with new image
-aws ecs register-task-definition --cli-input-json file://task-def.json
-
-# Update service
-aws ecs update-service \
-  --cluster sf-oauth-demo-cluster \
-  --service sf-oauth-demo-service \
-  --task-definition sf-oauth-demo:$NEW_VERSION \
-  --force-new-deployment
-```
+For more troubleshooting, see [docs/AWS_DEPLOYMENT.md](docs/AWS_DEPLOYMENT.md#troubleshooting).
 
 ## 🧹 Cleanup
 
@@ -521,13 +394,9 @@ cd terraform
 terraform destroy
 ```
 
-Type `yes` when prompted. This will delete:
-- ECS Service and Cluster
-- Load Balancer and Target Groups
-- VPC, Subnets, and Networking
-- Secrets Manager secret (after 7-day recovery window)
-- CloudWatch Log Groups
-- IAM Roles and Policies
+Type `yes` when prompted. This will delete all resources and stop billing.
+
+See [docs/AWS_DEPLOYMENT.md](docs/AWS_DEPLOYMENT.md#teardown-instructions) for detailed cleanup steps.
 
 ---
 
@@ -535,10 +404,9 @@ Type `yes` when prompted. This will delete:
 
 ### Documentation in This Repository
 - **[Authentication Setup Guide](docs/AUTH_SETUP.md)** - Complete OAuth 2.0 setup with detailed Web Server Flow + PKCE explanation
-  - Salesforce Connected App configuration
-  - Step-by-step OAuth flow breakdown
-  - PKCE security explanation
-  - Troubleshooting guide
+- **[Docker Guide](docs/DOCKER.md)** - Build and run the application in Docker containers
+- **[AWS Deployment Guide](docs/AWS_DEPLOYMENT.md)** - Deploy to AWS ECS with Terraform (static IP, secrets, teardown)
+- **[IAM Security Guide](docs/IAM_SECURITY.md)** - Detailed IAM roles, policies, and security best practices
 
 ### External Resources
 - [Salesforce OAuth 2.0 Web Server Flow Documentation](https://help.salesforce.com/s/articleView?id=sf.remoteaccess_oauth_web_server_flow.htm)

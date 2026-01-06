@@ -1,7 +1,7 @@
 # Example terraform.tfvars file
 # Copy this to terraform.tfvars and fill in your values
 
-aws_region    = "us-east-1"
+aws_region    = "eu-central-1"
 project_name  = "sf-oauth-demo"
 environment   = "dev"
 
@@ -13,7 +13,7 @@ sf_callback_url  = "http://your-alb-dns-name/oauth/callback"  # Update after fir
 sf_login_url     = "https://login.salesforce.com"
 
 # Docker image - will be updated after pushing to ECR
-container_image = "your-account-id.dkr.ecr.us-east-1.amazonaws.com/sf-oauth-demo:latest"
+container_image = "your-account-id.dkr.ecr.eu-central-1.amazonaws.com/sf-oauth-demo:latest"
 
 # Generate a random string for session secret
 session_secret = "change-this-to-a-random-string-minimum-32-characters"
