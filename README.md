@@ -16,6 +16,7 @@ A complete demonstration of Salesforce Web Server OAuth flow with PKCE (Proof Ke
 ## 📚 Documentation
 
 - **[Authentication Setup Guide](docs/AUTH_SETUP.md)** - Complete guide to setting up Salesforce OAuth with detailed Web Server Flow + PKCE explanation
+- **[Docker Guide](docs/DOCKER.md)** - How to build and run the application in Docker
 - **[Quick Start](#-quick-start)** - Get started in 5 minutes (see below)
 - **[API Reference](#-api-endpoints)** - All available endpoints
 - **[Architecture](#️-architecture)** - How the modules work together
@@ -25,7 +26,8 @@ A complete demonstration of Salesforce Web Server OAuth flow with PKCE (Proof Ke
 ```
 salesforce-oauth-demo/
 ├── docs/
-│   └── AUTH_SETUP.md         # 📖 Detailed auth setup & flow explanation
+│   ├── AUTH_SETUP.md         # 📖 Detailed auth setup & flow explanation
+│   └── DOCKER.md             # 🐳 Docker build & run guide
 ├── src/
 │   ├── server.js             # Main Express server
 │   ├── auth/
@@ -187,14 +189,23 @@ This application implements the secure **OAuth 2.0 Web Server Flow** with **PKCE
 5. Fill in the Lead form and create a test lead
 6. Verify the lead in Salesforce
 
-## 🐳 Docker Build and Test
+## 🐳 Running with Docker
 
-Build the Docker image:
+**📖 For complete Docker documentation, see [docs/DOCKER.md](docs/DOCKER.md)**
+
+### Quick Docker Start
+
+Build the image:
 ```bash
 docker build -t sf-oauth-demo .
 ```
 
-Run the container locally:
+Run with your .env file (easiest):
+```bash
+docker run -p 3000:3000 --env-file .env sf-oauth-demo
+```
+
+Or pass environment variables directly:
 ```bash
 docker run -p 3000:3000 \
   -e SF_CLIENT_ID="your_client_id" \
@@ -204,6 +215,25 @@ docker run -p 3000:3000 \
   -e SESSION_SECRET="your_session_secret" \
   sf-oauth-demo
 ```
+
+Run in background (detached mode):
+```bash
+docker run -d -p 3000:3000 --env-file .env --name sf-oauth sf-oauth-demo
+```
+
+View logs:
+```bash
+docker logs -f sf-oauth
+```
+
+Visit **http://localhost:3000** to test!
+
+**See [docs/DOCKER.md](docs/DOCKER.md) for:**
+- Container management commands
+- Health checks
+- Troubleshooting
+- Production deployment
+- Docker Compose setup
   -e SF_CLIENT_ID=your_consumer_key \
   -e SF_CLIENT_SECRET=your_consumer_secret \
   -e SF_CALLBACK_URL=http://localhost:3000/oauth/callback \
