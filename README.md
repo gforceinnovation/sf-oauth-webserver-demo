@@ -180,11 +180,30 @@ This application implements the secure **OAuth 2.0 Web Server Flow** with **PKCE
 ## 🔐 Security Features
 
 - **PKCE (Proof Key for Code Exchange)** - Prevents authorization code interception attacks ([Learn more](docs/AUTH_SETUP.md#why-web-server-flow-with-pkce-is-secure))
+- **OAuth state validation** - Protects against CSRF and auth code injection
 - **Session-based authentication** - Secure server-side token storage (not in browser)
 - **Environment variables** - Sensitive data (client secret) not in code
 - **Short-lived authorization codes** - Valid for only 15 minutes
 - **HTTPS support** - All production traffic encrypted (recommended)
 - **Client secret protection** - Never exposed to client
+- **Secure session cookies** - `httpOnly`, `sameSite=lax`, `secure` in production
+
+## 🧠 Session Management (Important for ECS)
+
+- **Session secret required in production**: `SESSION_SECRET` must be set when `NODE_ENV=production`.
+- **Trust proxy for HTTPS**: Set `TRUST_PROXY=true` behind ALB/CloudFront so secure cookies work correctly.
+- **Cookie security**: `COOKIE_SECURE=true` in HTTPS environments.
+- **Scaling**: The default in-memory session store is not suitable for multi-task ECS. Use Redis/DynamoDB-backed sessions or sticky sessions on the load balancer.
+
+## ♻️ Refresh Tokens
+
+This demo **does not store or use refresh tokens**. The OAuth scopes include `refresh_token`, but the server currently:
+- Exchanges the auth code for an access token.
+- Stores only the access token + instance URL in the session.
+
+If you want refresh token support, we can:
+- Persist the refresh token securely (e.g., encrypted storage).
+- Use the `refresh_token` grant when the access token expires.
 
 ## 🧪 Testing Locally
 
@@ -227,6 +246,12 @@ Run in background (detached mode):
 docker run -d -p 3000:3000 --env-file .env --name sf-oauth sf-oauth-demo
 ```
 
+### Docker Compose (recommended)
+
+```bash
+docker compose up --build
+```
+
 View logs:
 ```bash
 docker logs -f sf-oauth
@@ -240,15 +265,6 @@ Visit **http://localhost:3000** to test!
 - Troubleshooting
 - Production deployment
 - Docker Compose setup
-  -e SF_CLIENT_ID=your_consumer_key \
-  -e SF_CLIENT_SECRET=your_consumer_secret \
-  -e SF_CALLBACK_URL=http://localhost:3000/oauth/callback \
-  -e SF_LOGIN_URL=https://login.salesforce.com \
-  -e SESSION_SECRET=your_session_secret \
-  sf-oauth-demo
-```
-
-Test at `http://localhost:3000`
 
 ## ☁️ AWS Deployment
 
