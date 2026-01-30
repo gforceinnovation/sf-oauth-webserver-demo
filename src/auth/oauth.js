@@ -14,6 +14,10 @@ function generateCodeChallenge(verifier) {
   return crypto.createHash('sha256').update(verifier).digest('base64url');
 }
 
+function generateState() {
+  return crypto.randomBytes(16).toString('base64url');
+}
+
 /**
  * Initiate OAuth flow with PKCE
  * Generates code challenge and redirects to Salesforce login
@@ -28,17 +32,23 @@ function initiateOAuthFlow(req, res, config) {
   // Generate PKCE values
   const codeVerifier = generateCodeVerifier();
   const codeChallenge = generateCodeChallenge(codeVerifier);
+  const state = generateState();
   
   // Store code verifier in session for later use in token exchange
   req.session.codeVerifier = codeVerifier;
+  req.session.oauthState = state;
   
   console.log('🔑 PKCE code challenge generated');
   
+  const scope = config.scopes || 'openid profile email refresh_token api';
+
   // Build authorization URL with PKCE
   const authUrl = `${config.loginUrl}/services/oauth2/authorize?` +
     `response_type=code&` +
     `client_id=${encodeURIComponent(config.clientId)}&` +
     `redirect_uri=${encodeURIComponent(config.callbackUrl)}&` +
+    `scope=${encodeURIComponent(scope)}&` +
+    `state=${encodeURIComponent(state)}&` +
     `code_challenge=${codeChallenge}&` +
     `code_challenge_method=S256`;
   
@@ -51,7 +61,7 @@ function initiateOAuthFlow(req, res, config) {
  * Exchanges authorization code for access token
  */
 async function handleOAuthCallback(req, res, config) {
-  const { code, error, error_description } = req.query;
+  const { code, error, error_description, state } = req.query;
   
   // Check for errors from Salesforce
   if (error) {
@@ -71,6 +81,12 @@ async function handleOAuthCallback(req, res, config) {
     return res.status(400).send('Session expired. Please try again.');
   }
 
+  const expectedState = req.session.oauthState;
+  if (!expectedState || state !== expectedState) {
+    console.error('❌ Invalid OAuth state');
+    return res.status(400).send('Invalid OAuth state. Please try again.');
+  }
+
   console.log('🔄 Exchanging authorization code for access token...');
 
   try {
@@ -86,7 +102,8 @@ async function handleOAuthCallback(req, res, config) {
           client_secret: config.clientSecret,
           redirect_uri: config.callbackUrl,
           code_verifier: codeVerifier  // PKCE code verifier
-        }
+        },
+        timeout: 10000
       }
     );
 
@@ -98,6 +115,7 @@ async function handleOAuthCallback(req, res, config) {
     
     // Clear the code verifier from session (no longer needed)
     delete req.session.codeVerifier;
+    delete req.session.oauthState;
 
     console.log('✅ OAuth successful! Access token obtained');
     res.redirect('/app');

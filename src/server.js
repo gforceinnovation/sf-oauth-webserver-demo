@@ -9,13 +9,19 @@ const salesforce = require('./salesforce/api');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const isProduction = process.env.NODE_ENV === 'production';
+const trustProxy = process.env.TRUST_PROXY === '1' || process.env.TRUST_PROXY === 'true';
+const cookieSecure = process.env.COOKIE_SECURE
+  ? process.env.COOKIE_SECURE === 'true'
+  : isProduction;
 
 // Salesforce configuration from .env file
 const config = {
   clientId: process.env.SF_CLIENT_ID,
   clientSecret: process.env.SF_CLIENT_SECRET,
   callbackUrl: process.env.SF_CALLBACK_URL,
-  loginUrl: process.env.SF_LOGIN_URL || 'https://login.salesforce.com'
+  loginUrl: process.env.SF_LOGIN_URL || 'https://login.salesforce.com',
+  scopes: process.env.SF_OAUTH_SCOPES
 };
 
 console.log('🔧 Configuration loaded from .env');
@@ -24,15 +30,33 @@ console.log('   Client Secret:', config.clientSecret ? '✓ Set' : '✗ Missing'
 console.log('   Callback URL:', config.callbackUrl || '✗ Missing');
 
 // Middleware
+app.disable('x-powered-by');
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Session configuration
+if (!process.env.SESSION_SECRET && isProduction) {
+  throw new Error('SESSION_SECRET is required in production');
+}
+if (!process.env.SESSION_SECRET) {
+  console.warn('⚠️  SESSION_SECRET not set. Using insecure default for local dev only.');
+}
+
+if (trustProxy) {
+  app.set('trust proxy', 1);
+}
+
 app.use(session({
   secret: process.env.SESSION_SECRET || 'simple-demo-secret',
   resave: false,
   saveUninitialized: false,
-  cookie: { maxAge: 3600000 } // 1 hour
+  proxy: trustProxy,
+  cookie: {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: cookieSecure,
+    maxAge: 3600000 // 1 hour
+  }
 }));
 
 // Serve static files

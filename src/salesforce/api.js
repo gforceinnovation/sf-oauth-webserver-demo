@@ -14,7 +14,8 @@ async function getUserInfo(accessToken, instanceUrl) {
       {
         headers: {
           'Authorization': `Bearer ${accessToken}`
-        }
+        },
+        timeout: 10000
       }
     );
     console.log('✅ User info retrieved:', response.data.name);
@@ -29,7 +30,14 @@ async function getUserInfo(accessToken, instanceUrl) {
  * Create a Lead in Salesforce
  */
 async function createLead(accessToken, instanceUrl, leadData) {
-  const { firstName, lastName, company, email, phone } = leadData;
+  const clean = (value) => (typeof value === 'string' ? value.trim() : value);
+  const { firstName, lastName, company, email, phone } = {
+    firstName: clean(leadData.firstName),
+    lastName: clean(leadData.lastName),
+    company: clean(leadData.company),
+    email: clean(leadData.email),
+    phone: clean(leadData.phone)
+  };
 
   // Validate required fields
   if (!lastName || !company) {
@@ -55,7 +63,8 @@ async function createLead(accessToken, instanceUrl, leadData) {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
-        }
+        },
+        timeout: 10000
       }
     );
 
